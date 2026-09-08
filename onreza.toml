@@ -1,0 +1,3 @@
+[deploy]
+entry = "app_new.py"
+Fix typo in onreza.toml
