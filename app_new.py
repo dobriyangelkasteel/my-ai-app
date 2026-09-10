@@ -415,12 +415,12 @@ async def home():
                 <label>🌈 Цвета градиента</label>
                 <input type="text" id="gradientColors" value="#6366f1, #8b5cf6">
                 <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
-                    <button type="button" class="upload-label" onclick="setGradient('#6366f1,#8b5cf6')">Фиолетовый</button>
-                    <button type="button" class="upload-label" onclick="setGradient('#f093fb,#f5576c')">Розовый</button>
-                    <button type="button" class="upload-label" onclick="setGradient('#4facfe,#00f2fe')">Голубой</button>
-                    <button type="button" class="upload-label" onclick="setGradient('#43e97b,#38f9d7')">Зелёный</button>
-                </div>
-            </div>
+    <button type="button" class="upload-label" onclick="setGradient('#6366f1,#8b5cf6')">Фиолетовый</button>
+    <button type="button" class="upload-label" onclick="setGradient('#f093fb,#f5576c')">Розовый</button>
+    <button type="button" class="upload-label" onclick="setGradient('#4facfe,#00f2fe')">Голубой</button>
+    <button type="button" class="upload-label" onclick="setGradient('#43e97b,#38f9d7')">Зелёный</button>
+    <button type="button" class="upload-label" onclick="setGradient('#fa709a,#fee140')">Закат</button>
+</div>
 
             <div class="checkbox-group">
                 <input type="checkbox" id="upscale" name="upscale">
