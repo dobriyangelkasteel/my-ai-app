@@ -491,10 +491,16 @@ async def home():
                 let successCount = 0;
 
                 for (let i = 0; i < files.length; i++) {
-                    document.getElementById('progressText').textContent = 
-                        `⏳ Обработка ${i + 1} из ${files.length}...`;
+    document.getElementById('progressText').textContent = 
+        `⏳ Обработка ${i + 1} из ${files.length}...`;
 
-                    const formData = new FormData();
+    // ЗАДЕРЖКА МЕЖДУ ЗАПРОСАМИ (1 секунда)
+    if (i > 0) {
+        await new Promise(r => setTimeout(r, 1200));
+    }
+
+    const formData = new FormData();
+    // ... остальной код без изменений
                     formData.append('files', files[i]);
                     formData.append('bg_type', bgType);
 
