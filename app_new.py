@@ -4,8 +4,8 @@ import uvicorn
 import requests
 import os
 import io
-from PIL import Image
-import base64
+import zipfile
+from PIL import Image, ImageFilter, ImageEnhance
 
 app = FastAPI()
 os.makedirs("temp", exist_ok=True)
@@ -70,6 +70,17 @@ def add_background(foreground_bytes, bg_type, bg_color=None, bg_image_bytes=None
     else:
         return fg
 
+def upscale_image(image_bytes, scale=2):
+    img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
+    new_size = (img.width * scale, img.height * scale)
+    img = img.resize(new_size, Image.Resampling.LANCZOS)
+    img = img.filter(ImageFilter.SHARPEN)
+    enhancer = ImageEnhance.Contrast(img)
+    img = enhancer.enhance(1.1)
+    output = io.BytesIO()
+    img.save(output, format="PNG")
+    return output.getvalue()
+
 @app.get("/", response_class=HTMLResponse)
 async def home():
     return """
@@ -77,7 +88,7 @@ async def home():
     <html lang="ru">
     <head>
         <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=yes">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>AI Фотостудия — Замени фон</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
         <style>
@@ -96,22 +107,33 @@ async def home():
                 backdrop-filter: blur(20px);
                 border-radius: 24px;
                 padding: 24px 20px;
-                max-width: 700px;
+                max-width: 750px;
                 width: 100%;
                 box-shadow: 0 25px 50px -12px rgba(0,0,0,0.6);
                 border: 1px solid rgba(255,255,255,0.08);
             }
-            h1 {
-                font-size: 24px;
-                font-weight: 700;
-                color: #fff;
+            .logo {
                 display: flex;
                 align-items: center;
                 justify-content: center;
                 gap: 10px;
-                margin-bottom: 6px;
-                text-align: center;
-                flex-wrap: wrap;
+                margin-bottom: 8px;
+            }
+            .logo-icon {
+                font-size: 28px;
+                animation: pulse 2s ease-in-out infinite;
+            }
+            @keyframes pulse {
+                0%, 100% { transform: scale(1); }
+                50% { transform: scale(1.1); }
+            }
+            .logo-text {
+                font-size: 24px;
+                font-weight: 700;
+                background: linear-gradient(135deg, #a78bfa, #f472b6);
+                -webkit-background-clip: text;
+                -webkit-text-fill-color: transparent;
+                background-clip: text;
             }
             .subtitle {
                 color: rgba(255,255,255,0.6);
@@ -121,9 +143,7 @@ async def home():
                 border-bottom: 1px solid rgba(255,255,255,0.06);
                 padding-bottom: 16px;
             }
-            .form-group {
-                margin-bottom: 14px;
-            }
+            .form-group { margin-bottom: 14px; }
             .form-group label {
                 display: block;
                 color: rgba(255,255,255,0.8);
@@ -144,9 +164,7 @@ async def home():
                 border-color: rgba(255,255,255,0.3);
                 background: rgba(255,255,255,0.07);
             }
-            .upload-box input[type="file"] {
-                display: none;
-            }
+            .upload-box input[type="file"] { display: none; }
             .upload-label {
                 display: inline-block;
                 background: rgba(255,255,255,0.08);
@@ -158,9 +176,7 @@ async def home():
                 transition: all 0.2s ease;
                 border: 1px solid rgba(255,255,255,0.06);
             }
-            .upload-label:hover {
-                background: rgba(255,255,255,0.14);
-            }
+            .upload-label:hover { background: rgba(255,255,255,0.14); }
             .file-name {
                 color: rgba(255,255,255,0.4);
                 font-size: 12px;
@@ -177,17 +193,8 @@ async def home():
                 outline: none;
                 transition: all 0.2s ease;
                 font-family: 'Inter', sans-serif;
-                -webkit-appearance: none;
-                appearance: none;
             }
-            select:focus, input[type="text"]:focus {
-                border-color: rgba(139, 92, 246, 0.5);
-                background: rgba(255,255,255,0.08);
-            }
-            select option {
-                background: #1a1a2e;
-                color: #fff;
-            }
+            select option { background: #1a1a2e; color: #fff; }
             .btn-primary {
                 background: linear-gradient(135deg, #6366f1, #8b5cf6);
                 color: #fff;
@@ -200,14 +207,10 @@ async def home():
                 transition: all 0.2s ease;
                 width: 100%;
                 box-shadow: 0 8px 20px -6px rgba(99, 102, 241, 0.4);
-                touch-action: manipulation;
             }
             .btn-primary:hover {
                 transform: translateY(-2px);
                 box-shadow: 0 12px 28px -8px rgba(99, 102, 241, 0.6);
-            }
-            .btn-primary:active {
-                transform: scale(0.97);
             }
             .btn-group {
                 display: flex;
@@ -228,11 +231,6 @@ async def home():
                 transition: all 0.2s ease;
                 flex: 1;
                 min-width: 120px;
-                box-shadow: 0 6px 16px -4px rgba(16, 185, 129, 0.35);
-                touch-action: manipulation;
-            }
-            .btn-download:hover {
-                transform: translateY(-2px);
             }
             .btn-reset {
                 background: rgba(255,255,255,0.08);
@@ -246,11 +244,6 @@ async def home():
                 transition: all 0.2s ease;
                 flex: 1;
                 min-width: 120px;
-                touch-action: manipulation;
-            }
-            .btn-reset:hover {
-                background: rgba(255,255,255,0.15);
-                transform: translateY(-2px);
             }
             .bg-options {
                 display: flex;
@@ -264,20 +257,35 @@ async def home():
                 color: rgba(255,255,255,0.7);
                 font-size: 13px;
                 cursor: pointer;
-                padding: 4px 0;
             }
             .bg-options input[type="radio"] {
                 accent-color: #8b5cf6;
                 width: 16px;
                 height: 16px;
+            }
+            .hidden { display: none !important; }
+            .checkbox-group {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                margin: 10px 0;
+                padding: 10px;
+                background: rgba(255,255,255,0.03);
+                border-radius: 10px;
+                border: 1px solid rgba(255,255,255,0.06);
+            }
+            .checkbox-group input[type="checkbox"] {
+                accent-color: #10b981;
+                width: 18px;
+                height: 18px;
                 cursor: pointer;
-                flex-shrink: 0;
             }
-            .hidden {
-                display: none !important;
+            .checkbox-group label {
+                color: rgba(255,255,255,0.8);
+                font-size: 13px;
+                cursor: pointer;
+                margin: 0;
             }
-
-            /* ===== РЕЗУЛЬТАТ СРАВНЕНИЯ ===== */
             .compare-wrapper {
                 display: flex;
                 gap: 16px;
@@ -288,7 +296,6 @@ async def home():
             .compare-item {
                 flex: 1 1 200px;
                 min-width: 150px;
-                max-width: 100%;
                 background: rgba(0,0,0,0.25);
                 border-radius: 16px;
                 padding: 12px;
@@ -309,16 +316,9 @@ async def home():
                 text-align: center;
                 margin-top: 6px;
                 font-weight: 500;
-                letter-spacing: 0.3px;
             }
-            .badge-original {
-                color: #fcd34d;
-            }
-            .badge-result {
-                color: #6ee7b7;
-            }
-
-            /* ===== СПИННЕР ===== */
+            .badge-original { color: #fcd34d; }
+            .badge-result { color: #6ee7b7; }
             .spinner {
                 border: 3px solid rgba(255,255,255,0.08);
                 border-top: 3px solid #8b5cf6;
@@ -328,9 +328,7 @@ async def home():
                 animation: spin 0.9s linear infinite;
                 margin: 20px auto;
             }
-            @keyframes spin {
-                to { transform: rotate(360deg); }
-            }
+            @keyframes spin { to { transform: rotate(360deg); } }
             .status-text {
                 color: rgba(255,255,255,0.7);
                 font-size: 14px;
@@ -346,99 +344,37 @@ async def home():
                 font-size: 14px;
                 text-align: center;
             }
-
-            /* ===== АДАПТАЦИЯ ПОД ТЕЛЕФОН ===== */
             @media (max-width: 480px) {
-                .container {
-                    padding: 16px 12px;
-                    border-radius: 16px;
-                }
-                h1 {
-                    font-size: 20px;
-                    gap: 6px;
-                }
-                .subtitle {
-                    font-size: 12px;
-                    margin-bottom: 14px;
-                    padding-bottom: 12px;
-                }
-                .upload-box {
-                    padding: 12px;
-                }
-                .btn-primary {
-                    padding: 14px 16px;
-                    font-size: 15px;
-                }
+                .container { padding: 16px 12px; border-radius: 16px; }
+                .logo-text { font-size: 20px; }
+                .logo-icon { font-size: 24px; }
+                .btn-primary { padding: 14px 16px; font-size: 15px; }
                 .btn-download, .btn-reset {
                     padding: 12px 16px;
                     font-size: 13px;
                     min-width: 100%;
                 }
-                .btn-group {
-                    flex-direction: column;
-                    gap: 8px;
-                }
-                .compare-wrapper {
-                    flex-direction: column;
-                    gap: 12px;
-                }
-                .compare-item {
-                    flex: 1 1 auto;
-                    min-width: unset;
-                }
-                .compare-item img {
-                    max-height: 220px;
-                }
-                .bg-options {
-                    gap: 6px;
-                }
-                .bg-options label {
-                    font-size: 12px;
-                }
-                select, input[type="text"] {
-                    font-size: 14px;
-                    padding: 12px 14px;
-                }
-                .form-group {
-                    margin-bottom: 12px;
-                }
-                .form-group label {
-                    font-size: 12px;
-                }
-                .upload-label {
-                    font-size: 12px;
-                    padding: 6px 16px;
-                }
-            }
-
-            @media (max-width: 380px) {
-                .container {
-                    padding: 12px 8px;
-                }
-                h1 {
-                    font-size: 17px;
-                }
-                .compare-item img {
-                    max-height: 160px;
-                }
-                .btn-primary {
-                    font-size: 14px;
-                    padding: 12px 12px;
-                }
+                .btn-group { flex-direction: column; gap: 8px; }
+                .compare-wrapper { flex-direction: column; gap: 12px; }
+                .compare-item { flex: 1 1 auto; min-width: unset; }
+                .compare-item img { max-height: 220px; }
             }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🖼️ Замени фон за секунду</h1>
-            <p class="subtitle">Удаляем старый фон и ставим новый — цвет, картинку или градиент</p>
+            <div class="logo">
+                <span class="logo-icon">✨</span>
+                <span class="logo-text">AI Фотостудия</span>
+            </div>
+            <p class="subtitle">Удаляем фон и ставим новый — цвет, картинку или градиент</p>
 
             <div class="form-group">
-                <label>📷 Фото с человеком</label>
+                <label>📷 Фото (можно выбрать несколько)</label>
                 <div class="upload-box" onclick="document.getElementById('fileInput').click()">
-                    <input type="file" id="fileInput" accept="image/*">
+                    <input type="file" id="fileInput" accept="image/*" multiple>
                     <span class="upload-label">Выбрать фото</span>
-                    <div id="fileName" class="file-name">Файл не выбран</div>
+                    <div id="fileName" class="file-name">Файлы не выбраны</div>
                 </div>
             </div>
 
@@ -451,24 +387,21 @@ async def home():
                 </div>
             </div>
 
-            <!-- Выбор цвета -->
             <div class="form-group" id="colorOptions">
                 <label>Выберите цвет фона</label>
                 <select id="bgColor">
                     <option value="#ffffff">⬜ Белый</option>
                     <option value="#e0f2fe">🟦 Голубой</option>
                     <option value="#d1fae5">🟩 Зелёный</option>
-                    <option value="#fce4ec">🟪 Светло-розовый</option>
                     <option value="#fef3c7">🟨 Жёлтый</option>
                     <option value="#1a1a2e">⬛ Тёмный</option>
-                    <option value="#f472b6">💗 Насыщенный розовый</option>
+                    <option value="#f472b6">💗 Розовый</option>
                     <option value="#fb923c">🟧 Оранжевый</option>
                     <option value="#a78bfa">🟪 Фиолетовый</option>
                     <option value="#ef4444">🔴 Красный</option>
                 </select>
             </div>
 
-            <!-- Загрузка своей картинки -->
             <div class="form-group hidden" id="imageOptions">
                 <label>🖼️ Загрузите картинку для фона</label>
                 <div class="upload-box" onclick="document.getElementById('bgFileInput').click()">
@@ -478,20 +411,23 @@ async def home():
                 </div>
             </div>
 
-            <!-- Градиент -->
             <div class="form-group hidden" id="gradientOptions">
-                <label>🌈 Цвета градиента (два цвета через запятую)</label>
-                <input type="text" id="gradientColors" value="#6366f1, #8b5cf6" placeholder="например: #ff6b6b, #4ecdc4">
+                <label>🌈 Цвета градиента</label>
+                <input type="text" id="gradientColors" value="#6366f1, #8b5cf6">
                 <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
                     <button type="button" class="upload-label" onclick="setGradient('#6366f1,#8b5cf6')">Фиолетовый</button>
                     <button type="button" class="upload-label" onclick="setGradient('#f093fb,#f5576c')">Розовый</button>
                     <button type="button" class="upload-label" onclick="setGradient('#4facfe,#00f2fe')">Голубой</button>
                     <button type="button" class="upload-label" onclick="setGradient('#43e97b,#38f9d7')">Зелёный</button>
-                    <button type="button" class="upload-label" onclick="setGradient('#fa709a,#fee140')">Закат</button>
                 </div>
             </div>
 
-            <button class="btn-primary" onclick="sendImage()">🚀 Обработать фото</button>
+            <div class="checkbox-group">
+                <input type="checkbox" id="upscale" name="upscale">
+                <label for="upscale">🔍 Улучшить качество (увеличение 2x)</label>
+            </div>
+
+            <button class="btn-primary" onclick="sendImage()">🚀 Обработать</button>
 
             <div id="result">
                 <p style="color: rgba(255,255,255,0.3); text-align: center; padding: 30px 0; font-size: 13px;">
@@ -505,10 +441,14 @@ async def home():
             let originalImageUrl = null;
 
             document.getElementById('fileInput').addEventListener('change', function(e) {
-                const file = e.target.files[0];
-                document.getElementById('fileName').textContent = file ? file.name : 'Файл не выбран';
-                if (file) {
-                    originalImageUrl = URL.createObjectURL(file);
+                const files = e.target.files;
+                if (files.length === 1) {
+                    document.getElementById('fileName').textContent = files[0].name;
+                } else {
+                    document.getElementById('fileName').textContent = `${files.length} файлов`;
+                }
+                if (files.length > 0) {
+                    originalImageUrl = URL.createObjectURL(files[0]);
                 }
             });
 
@@ -529,8 +469,8 @@ async def home():
 
             async function sendImage() {
                 const fileInput = document.getElementById('fileInput');
-                const file = fileInput.files[0];
-                if (!file) {
+                const files = fileInput.files;
+                if (files.length === 0) {
                     alert('📸 Сначала выберите фото!');
                     return;
                 }
@@ -538,11 +478,13 @@ async def home():
                 const resultDiv = document.getElementById('result');
                 resultDiv.innerHTML = `
                     <div class="spinner"></div>
-                    <p class="status-text">⏳ ИИ обрабатывает фото... это займёт до 30 секунд</p>
+                    <p class="status-text">⏳ Обработка ${files.length} фото... это может занять до минуты</p>
                 `;
 
                 const formData = new FormData();
-                formData.append('file', file);
+                for (let i = 0; i < files.length; i++) {
+                    formData.append('files', files[i]);
+                }
 
                 const bgType = document.querySelector('input[name="bg_type"]:checked').value;
                 formData.append('bg_type', bgType);
@@ -551,18 +493,17 @@ async def home():
                     formData.append('bg_color', document.getElementById('bgColor').value);
                 } else if (bgType === 'image') {
                     const bgFile = document.getElementById('bgFileInput').files[0];
-                    if (bgFile) {
-                        formData.append('bg_image', bgFile);
-                    } else {
-                        resultDiv.innerHTML = `<p class="error-text">❌ Выберите картинку для фона!</p>`;
-                        return;
-                    }
+                    if (bgFile) formData.append('bg_image', bgFile);
                 } else if (bgType === 'gradient') {
                     formData.append('gradient_colors', document.getElementById('gradientColors').value);
                 }
 
+                if (document.getElementById('upscale').checked) {
+                    formData.append('upscale', 'true');
+                }
+
                 try {
-                    const response = await fetch('/process', {
+                    const response = await fetch('/process-multiple', {
                         method: 'POST',
                         body: formData
                     });
@@ -576,10 +517,9 @@ async def home():
                     currentResultBlob = blob;
                     const resultUrl = URL.createObjectURL(blob);
 
-                    // === ПОКАЗЫВАЕМ ДО/ПОСЛЕ ===
                     const originalHtml = originalImageUrl 
                         ? `<div class="compare-item">
-                            <img src="${originalImageUrl}" alt="Исходное фото" />
+                            <img src="${originalImageUrl}" alt="Исходное" />
                             <div class="compare-label badge-original">📷 Исходное</div>
                         </div>`
                         : '';
@@ -589,11 +529,11 @@ async def home():
                             ${originalHtml}
                             <div class="compare-item">
                                 <img src="${resultUrl}" alt="Результат" />
-                                <div class="compare-label badge-result">✨ Результат</div>
+                                <div class="compare-label badge-result">✨ Результат${files.length > 1 ? ' (ZIP)' : ''}</div>
                             </div>
                         </div>
                         <div class="btn-group">
-                            <button class="btn-download" onclick="downloadResult()">⬇️ Скачать PNG</button>
+                            <button class="btn-download" onclick="downloadResult()">⬇️ Скачать ${files.length > 1 ? 'ZIP' : 'PNG'}</button>
                             <button class="btn-reset" onclick="resetApp()">🔄 Новое фото</button>
                         </div>
                     `;
@@ -605,12 +545,12 @@ async def home():
 
             function downloadResult() {
                 if (!currentResultBlob) {
-                    alert('Нет результата для скачивания!');
+                    alert('Нет результата!');
                     return;
                 }
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(currentResultBlob);
-                link.download = 'result_with_bg.png';
+                link.download = 'results.zip';
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -623,9 +563,10 @@ async def home():
                     </p>
                 `;
                 document.getElementById('fileInput').value = '';
-                document.getElementById('fileName').textContent = 'Файл не выбран';
+                document.getElementById('fileName').textContent = 'Файлы не выбраны';
                 document.getElementById('bgFileInput').value = '';
                 document.getElementById('bgFileName').textContent = 'Файл не выбран';
+                document.getElementById('upscale').checked = false;
                 currentResultBlob = null;
                 originalImageUrl = null;
             }
@@ -634,35 +575,54 @@ async def home():
     </html>
     """
 
-@app.post("/process")
-async def process(
-    file: UploadFile = File(...),
+@app.post("/process-multiple")
+async def process_multiple(
+    files: list[UploadFile] = File(...),
     bg_type: str = Form("color"),
     bg_color: str = Form(None),
     bg_image: UploadFile = File(None),
-    gradient_colors: str = Form(None)
+    gradient_colors: str = Form(None),
+    upscale: str = Form(None)
 ):
-    image_data = await file.read()
-    foreground_bytes = remove_background(image_data)
-    
     bg_image_bytes = None
     if bg_image and bg_image.filename:
         bg_image_bytes = await bg_image.read()
     
-    result_image = add_background(
-        foreground_bytes, 
-        bg_type, 
-        bg_color, 
-        bg_image_bytes,
-        gradient_colors
-    )
+    if len(files) == 1:
+        image_data = await files[0].read()
+        foreground_bytes = remove_background(image_data)
+        result_image = add_background(foreground_bytes, bg_type, bg_color, bg_image_bytes, gradient_colors)
+        
+        if upscale == 'true':
+            output = io.BytesIO()
+            result_image.save(output, format="PNG")
+            upscaled = upscale_image(output.getvalue(), scale=2)
+            result_image = Image.open(io.BytesIO(upscaled))
+        
+        file_path = "temp/result.png"
+        result_image.save(file_path, "PNG")
+        return FileResponse(file_path, media_type="image/png")
     
-    file_path = "temp/result.png"
-    result_image.save(file_path, "PNG")
+    zip_path = "temp/results.zip"
+    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        for idx, file in enumerate(files):
+            image_data = await file.read()
+            foreground_bytes = remove_background(image_data)
+            result_image = add_background(foreground_bytes, bg_type, bg_color, bg_image_bytes, gradient_colors)
+            
+            if upscale == 'true':
+                output = io.BytesIO()
+                result_image.save(output, format="PNG")
+                upscaled = upscale_image(output.getvalue(), scale=2)
+                result_image = Image.open(io.BytesIO(upscaled))
+            
+            temp_path = f"temp/result_{idx}.png"
+            result_image.save(temp_path, "PNG")
+            zipf.write(temp_path, f"result_{idx}.png")
+            os.remove(temp_path)
     
-    return FileResponse(file_path, media_type="image/png")
+    return FileResponse(zip_path, media_type="application/zip", filename="results.zip")
 
 if __name__ == "__main__":
-    import os
     port = int(os.getenv("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
