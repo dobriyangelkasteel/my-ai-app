@@ -4,7 +4,7 @@ import uvicorn
 import requests
 import os
 import io
-import zipfile
+import base64
 from PIL import Image, ImageFilter, ImageEnhance
 
 app = FastAPI()
@@ -91,6 +91,7 @@ async def home():
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>AI Фотостудия — Замени фон</title>
         <link href="https://fonts.googleapis.com/css2?family=Inter:opsz@14..32&display=swap" rel="stylesheet">
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
         <style>
             * { margin: 0; padding: 0; box-sizing: border-box; }
             body {
@@ -191,7 +192,6 @@ async def home():
                 color: #fff;
                 font-size: 13px;
                 outline: none;
-                transition: all 0.2s ease;
                 font-family: 'Inter', sans-serif;
             }
             select option { background: #1a1a2e; color: #fff; }
@@ -210,7 +210,6 @@ async def home():
             }
             .btn-primary:hover {
                 transform: translateY(-2px);
-                box-shadow: 0 12px 28px -8px rgba(99, 102, 241, 0.6);
             }
             .btn-group {
                 display: flex;
@@ -228,7 +227,6 @@ async def home():
                 font-size: 14px;
                 font-weight: 600;
                 cursor: pointer;
-                transition: all 0.2s ease;
                 flex: 1;
                 min-width: 120px;
             }
@@ -241,7 +239,6 @@ async def home():
                 font-size: 14px;
                 font-weight: 500;
                 cursor: pointer;
-                transition: all 0.2s ease;
                 flex: 1;
                 min-width: 120px;
             }
@@ -415,13 +412,15 @@ async def home():
                 <label>🌈 Цвета градиента</label>
                 <input type="text" id="gradientColors" value="#6366f1, #8b5cf6">
                 <div style="display:flex; gap:6px; margin-top:6px; flex-wrap:wrap;">
-    <button type="button" class="upload-label" onclick="setGradient('#6366f1,#8b5cf6')">Фиолетовый</button>
-    <button type="button" class="upload-label" onclick="setGradient('#f093fb,#f5576c')">Розовый</button>
-    <button type="button" class="upload-label" onclick="setGradient('#4facfe,#00f2fe')">Голубой</button>
-    <button type="button" class="upload-label" onclick="setGradient('#43e97b,#38f9d7')">Зелёный</button>
-    <button type="button" class="upload-label" onclick="setGradient('#fa709a,#fee140')">Закат</button>
-</div>
+                    <button type="button" class="upload-label" onclick="setGradient('#6366f1,#8b5cf6')">Фиолетовый</button>
+                    <button type="button" class="upload-label" onclick="setGradient('#f093fb,#f5576c')">Розовый</button>
+                    <button type="button" class="upload-label" onclick="setGradient('#4facfe,#00f2fe')">Голубой</button>
+                    <button type="button" class="upload-label" onclick="setGradient('#43e97b,#38f9d7')">Зелёный</button>
+                    <button type="button" class="upload-label" onclick="setGradient('#fa709a,#fee140')">Закат</button>
+                </div>
+            </div>
 
+            <!-- ЧЕКБОКС ТЕПЕРЬ ВСЕГДА ВИДЕН (вынесен из gradientOptions) -->
             <div class="checkbox-group">
                 <input type="checkbox" id="upscale" name="upscale">
                 <label for="upscale">🔍 Улучшить качество (увеличение 2x)</label>
@@ -478,42 +477,66 @@ async def home():
                 const resultDiv = document.getElementById('result');
                 resultDiv.innerHTML = `
                     <div class="spinner"></div>
-                    <p class="status-text">⏳ Обработка ${files.length} фото... это может занять до минуты</p>
+                    <p class="status-text" id="progressText">⏳ Обработка 0 из ${files.length}...</p>
                 `;
 
-                const formData = new FormData();
-                for (let i = 0; i < files.length; i++) {
-                    formData.append('files', files[i]);
-                }
-
                 const bgType = document.querySelector('input[name="bg_type"]:checked').value;
-                formData.append('bg_type', bgType);
+                const upscale = document.getElementById('upscale').checked;
+                const bgColor = document.getElementById('bgColor').value;
+                const bgFile = document.getElementById('bgFileInput').files[0];
+                const gradColors = document.getElementById('gradientColors').value;
 
-                if (bgType === 'color') {
-                    formData.append('bg_color', document.getElementById('bgColor').value);
-                } else if (bgType === 'image') {
-                    const bgFile = document.getElementById('bgFileInput').files[0];
-                    if (bgFile) formData.append('bg_image', bgFile);
-                } else if (bgType === 'gradient') {
-                    formData.append('gradient_colors', document.getElementById('gradientColors').value);
-                }
+                // Собираем все результаты
+                const results = [];
+                let successCount = 0;
 
-                if (document.getElementById('upscale').checked) {
-                    formData.append('upscale', 'true');
-                }
+                for (let i = 0; i < files.length; i++) {
+                    document.getElementById('progressText').textContent = 
+                        `⏳ Обработка ${i + 1} из ${files.length}...`;
 
-                try {
-                    const response = await fetch('/process-multiple', {
-                        method: 'POST',
-                        body: formData
-                    });
+                    const formData = new FormData();
+                    formData.append('files', files[i]);
+                    formData.append('bg_type', bgType);
 
-                    if (!response.ok) {
-                        const errorText = await response.text();
-                        throw new Error(`Ошибка ${response.status}: ${errorText}`);
+                    if (bgType === 'color') {
+                        formData.append('bg_color', bgColor);
+                    } else if (bgType === 'image' && bgFile) {
+                        formData.append('bg_image', bgFile);
+                    } else if (bgType === 'gradient') {
+                        formData.append('gradient_colors', gradColors);
                     }
 
-                    const blob = await response.blob();
+                    if (upscale) {
+                        formData.append('upscale', 'true');
+                    }
+
+                    try {
+                        const response = await fetch('/process-multiple', {
+                            method: 'POST',
+                            body: formData
+                        });
+
+                        if (!response.ok) {
+                            console.error(`Ошибка на фото ${i + 1}`);
+                            continue;
+                        }
+
+                        const blob = await response.blob();
+                        results.push({ blob, name: files[i].name });
+                        successCount++;
+                    } catch (error) {
+                        console.error(`Ошибка на фото ${i + 1}:`, error);
+                    }
+                }
+
+                if (results.length === 0) {
+                    resultDiv.innerHTML = `<p class="error-text">❌ Не удалось обработать ни одного фото</p>`;
+                    return;
+                }
+
+                // Если одно фото — показываем как PNG
+                if (results.length === 1) {
+                    const blob = results[0].blob;
                     currentResultBlob = blob;
                     const resultUrl = URL.createObjectURL(blob);
 
@@ -529,17 +552,32 @@ async def home():
                             ${originalHtml}
                             <div class="compare-item">
                                 <img src="${resultUrl}" alt="Результат" />
-                                <div class="compare-label badge-result">✨ Результат${files.length > 1 ? ' (ZIP)' : ''}</div>
+                                <div class="compare-label badge-result">✨ Результат</div>
                             </div>
                         </div>
                         <div class="btn-group">
-                            <button class="btn-download" onclick="downloadResult()">⬇️ Скачать ${files.length > 1 ? 'ZIP' : 'PNG'}</button>
+                            <button class="btn-download" onclick="downloadResult()">⬇️ Скачать PNG</button>
                             <button class="btn-reset" onclick="resetApp()">🔄 Новое фото</button>
                         </div>
                     `;
-                } catch (error) {
-                    resultDiv.innerHTML = `<p class="error-text">❌ ${error.message}</p>`;
-                    console.error('Ошибка:', error);
+                } else {
+                    // Если несколько — собираем ZIP на клиенте
+                    const zip = new JSZip();
+                    for (const item of results) {
+                        zip.file(`result_${item.name}`, item.blob);
+                    }
+                    const zipBlob = await zip.generateAsync({ type: 'blob' });
+                    currentResultBlob = zipBlob;
+
+                    resultDiv.innerHTML = `
+                        <p style="color: #6ee7b7; text-align: center; padding: 20px; font-size: 15px;">
+                            ✅ Готово! Обработано ${successCount} из ${files.length} фото
+                        </p>
+                        <div class="btn-group">
+                            <button class="btn-download" onclick="downloadResult()">⬇️ Скачать ZIP</button>
+                            <button class="btn-reset" onclick="resetApp()">🔄 Новое фото</button>
+                        </div>
+                    `;
                 }
             }
 
@@ -550,7 +588,7 @@ async def home():
                 }
                 const link = document.createElement('a');
                 link.href = URL.createObjectURL(currentResultBlob);
-                link.download = 'results.zip';
+                link.download = currentResultBlob.type === 'application/zip' ? 'results.zip' : 'result.png';
                 document.body.appendChild(link);
                 link.click();
                 document.body.removeChild(link);
@@ -577,51 +615,32 @@ async def home():
 
 @app.post("/process-multiple")
 async def process_multiple(
-    files: list[UploadFile] = File(...),
+    files: UploadFile = File(...),
     bg_type: str = Form("color"),
     bg_color: str = Form(None),
     bg_image: UploadFile = File(None),
     gradient_colors: str = Form(None),
     upscale: str = Form(None)
 ):
+    # Теперь обрабатываем ТОЛЬКО ОДНО фото за запрос
+    image_data = await files.read()
+    foreground_bytes = remove_background(image_data)
+    
     bg_image_bytes = None
     if bg_image and bg_image.filename:
         bg_image_bytes = await bg_image.read()
     
-    if len(files) == 1:
-        image_data = await files[0].read()
-        foreground_bytes = remove_background(image_data)
-        result_image = add_background(foreground_bytes, bg_type, bg_color, bg_image_bytes, gradient_colors)
-        
-        if upscale == 'true':
-            output = io.BytesIO()
-            result_image.save(output, format="PNG")
-            upscaled = upscale_image(output.getvalue(), scale=2)
-            result_image = Image.open(io.BytesIO(upscaled))
-        
-        file_path = "temp/result.png"
-        result_image.save(file_path, "PNG")
-        return FileResponse(file_path, media_type="image/png")
+    result_image = add_background(foreground_bytes, bg_type, bg_color, bg_image_bytes, gradient_colors)
     
-    zip_path = "temp/results.zip"
-    with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zipf:
-        for idx, file in enumerate(files):
-            image_data = await file.read()
-            foreground_bytes = remove_background(image_data)
-            result_image = add_background(foreground_bytes, bg_type, bg_color, bg_image_bytes, gradient_colors)
-            
-            if upscale == 'true':
-                output = io.BytesIO()
-                result_image.save(output, format="PNG")
-                upscaled = upscale_image(output.getvalue(), scale=2)
-                result_image = Image.open(io.BytesIO(upscaled))
-            
-            temp_path = f"temp/result_{idx}.png"
-            result_image.save(temp_path, "PNG")
-            zipf.write(temp_path, f"result_{idx}.png")
-            os.remove(temp_path)
+    if upscale == 'true':
+        output = io.BytesIO()
+        result_image.save(output, format="PNG")
+        upscaled = upscale_image(output.getvalue(), scale=2)
+        result_image = Image.open(io.BytesIO(upscaled))
     
-    return FileResponse(zip_path, media_type="application/zip", filename="results.zip")
+    file_path = "temp/result.png"
+    result_image.save(file_path, "PNG")
+    return FileResponse(file_path, media_type="image/png")
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8000))
