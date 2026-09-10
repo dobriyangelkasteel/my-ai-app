@@ -100,7 +100,7 @@ async def home():
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                background: linear-gradient(135deg, #0f0c29, #302b63, #24243e);
+                background: linear-gradient(135deg, #4a6b7c, #2c4a5a, #1a2e3a);
                 padding: 16px;
             }
             .container {
